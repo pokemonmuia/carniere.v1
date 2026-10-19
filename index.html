@@ -271,7 +271,12 @@ nav.tabs button[aria-selected="true"]{color:var(--accent)}
     </fieldset>
 
     <div class="fields">
-      <label class="f"><span class="label">Foto</span><input id="fPhoto" type="file" accept="image/*" capture="environment"></label>
+      <div class="f"><span class="label">Foto</span>
+        <div class="row">
+          <label class="btn small">Scatta foto<input id="fPhotoCam" type="file" accept="image/*" capture="environment" hidden></label>
+          <label class="btn small">Scegli dalla galleria<input id="fPhoto" type="file" accept="image/*" hidden></label>
+          <button type="button" class="btn small ghost" id="fPhotoDel" hidden>Togli foto</button>
+        </div></div>
       <img id="photoPrev" class="photoPrev" alt="Anteprima foto" hidden>
     </div>
     <label class="f"><span class="label">Note</span><textarea id="fNotes" placeholder="Acqua velata, pasturato, mangiata in calata…"></textarea></label>
@@ -601,7 +606,7 @@ function renderActivity(){const o=cond&&cond.outlook;if(!o||!o.length)return;$("
 
 /* ================= form cattura ================= */
 let editingId=null,photoData=null;
-function resetForm(){editingId=null;photoData=null;$("#catchForm").reset();$("#fCount").value=1;$("#fTime").value=localInputValue(new Date());$("#photoPrev").hidden=true;$("#formTitle").textContent="Nuova cattura";$("#saveBtn").textContent="Salva cattura";$("#cancelEdit").hidden=true;$("#fishSet").disabled=false;delete $("#fDepth").dataset.touched;
+function resetForm(){editingId=null;photoData=null;$("#catchForm").reset();$("#fCount").value=1;$("#fTime").value=localInputValue(new Date());$("#photoPrev").hidden=true;$("#fPhotoDel").hidden=true;$("#formTitle").textContent="Nuova cattura";$("#saveBtn").textContent="Salva cattura";$("#cancelEdit").hidden=true;$("#fishSet").disabled=false;delete $("#fDepth").dataset.touched;
  if(point){$("#formPos").textContent=fmtPos(point.lat,point.lon);if(cond&&cond.depth!=null)$("#fDepth").value=Math.round(cond.depth*2)/2;$("#fBottom").value=$("#condBottom").value}
  const lastTech=catches[0]?.tech;if(lastTech)$("#fTech").value=lastTech;
  $("#fShare").value=settings.share||"zona";updateShareHint()}
@@ -609,7 +614,9 @@ $("#fDepth").oninput=e=>e.target.dataset.touched="1";
 $("#fBlank").onchange=e=>{$("#fishSet").disabled=e.target.checked};
 $("#formGps").onclick=async()=>{$("#formPos").textContent="cerco GPS…";try{const p=await getGPS();await setPoint(p.lat,p.lon,"gps",p.acc);$("#fBottom").value=$("#condBottom").value}catch(e){$("#formPos").textContent="GPS non disponibile";toast(e.message)}};
 $("#formUseMap").onclick=()=>{if(!point){toast("Scegli prima un punto nella scheda Condizioni");showTab("cond");return}$("#formPos").textContent=fmtPos(point.lat,point.lon);toast("Uso il punto selezionato")};
-$("#fPhoto").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{photoData=await shrinkImage(f);$("#photoPrev").src=photoData;$("#photoPrev").hidden=false}catch(err){toast("Foto non leggibile")}};
+async function pickPhoto(e){const f=e.target.files[0];e.target.value="";if(!f)return;try{photoData=await shrinkImage(f);$("#photoPrev").src=photoData;$("#photoPrev").hidden=false;$("#fPhotoDel").hidden=false}catch(err){toast("Foto non leggibile: prova con un'altra")}}
+$("#fPhoto").onchange=pickPhoto;$("#fPhotoCam").onchange=pickPhoto;
+$("#fPhotoDel").onclick=()=>{photoData=null;$("#photoPrev").hidden=true;$("#photoPrev").removeAttribute("src");$("#fPhotoDel").hidden=true};
 $("#cancelEdit").onclick=()=>{resetForm();showTab("diary")};
 
 $("#catchForm").addEventListener("submit",async e=>{e.preventDefault();const blank=$("#fBlank").checked;const species=$("#fSpecies").value.trim();
