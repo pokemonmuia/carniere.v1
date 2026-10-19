@@ -165,7 +165,11 @@ nav.tabs .wrap{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
 nav.tabs button{border:0;background:transparent;padding:10px 4px 8px;display:grid;justify-items:center;gap:2px;cursor:pointer;color:var(--muted);font-family:var(--f-display);font-weight:600;letter-spacing:.05em;text-transform:uppercase;font-size:.78rem}
 nav.tabs button svg{width:22px;height:22px}
 nav.tabs button[aria-selected="true"]{color:var(--accent)}
-.toast{position:fixed;left:50%;transform:translateX(-50%);width:max-content;text-align:center;bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;z-index:50;font-weight:600;max-width:90vw}
+.toast{pointer-events:none;position:fixed;left:50%;transform:translateX(-50%);width:max-content;text-align:center;bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;z-index:50;font-weight:600;max-width:90vw}
+.auth{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+.entry .t span.owner{display:inline}
+.owner{font-family:var(--f-display);font-weight:600;color:var(--depth)}
+.entry.foreign{background:var(--surface)}
 .confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:.9rem}
 @media (prefers-reduced-motion:no-preference){.bar i{transition:width .5s ease}}
 </style>
@@ -196,6 +200,7 @@ nav.tabs button[aria-selected="true"]{color:var(--accent)}
       <label><input type="checkbox" id="lyrBathy" checked> Batimetria EMODnet</label>
       <label><input type="checkbox" id="lyrSeamark" checked> Segnali OpenSeaMap</label>
       <label><input type="checkbox" id="lyrCatches" checked> Le mie catture</label>
+      <label id="lyrCommWrap" hidden><input type="checkbox" id="lyrComm" checked> Catture della community</label>
     </div>
     <div class="fields">
       <label class="f"><span class="label">Fondale in questo punto</span>
@@ -259,6 +264,9 @@ nav.tabs button[aria-selected="true"]{color:var(--accent)}
         <label class="f"><span class="label">Profondità (m)</span><input id="fDepth" type="number" min="0" step="0.5" inputmode="decimal"><span class="hint" id="depthHint">Dalla carta batimetrica, se disponibile. Correggi se hai l'ecoscandaglio.</span></label>
         <label class="f"><span class="label">Data e ora</span><input id="fTime" type="datetime-local"></label>
         <label class="f"><span class="label">Nome dello spot</span><input id="fSpot" autocomplete="off" placeholder="es. Scogliera del faro"></label>
+        <label class="f"><span class="label">Chi la vede</span>
+          <select id="fShare"><option value="zona">Tutti, ma solo la zona (~1 km)</option><option value="esatta">Tutti, con il punto esatto</option><option value="privata">Solo io</option></select>
+          <span class="hint" id="shareHint"></span></label>
       </div>
     </fieldset>
 
@@ -275,8 +283,16 @@ nav.tabs button[aria-selected="true"]{color:var(--accent)}
 
 <!-- ============ DIARIO ============ -->
 <section class="tab" id="tab-diary" hidden>
+  <div class="panel" id="acctPanel">
+    <header><h2>Community</h2><span class="label" id="acctState"></span></header>
+    <div id="acctBody"></div>
+  </div>
   <div class="panel">
     <header><h2>Diario</h2><span class="label" id="diaryCount"></span></header>
+    <div class="seg" role="group" aria-label="Quali catture mostrare" id="srcSeg" hidden>
+      <button type="button" data-src="mine" aria-pressed="true">Le mie</button>
+      <button type="button" data-src="all" aria-pressed="false">Della community</button>
+    </div>
     <div id="diaryMap"></div>
     <div class="row">
       <label class="f" style="flex:1;min-width:0"><input id="diaryFilter" type="search" placeholder="Filtra per specie, esca, spot…" aria-label="Filtra" enterkeyhint="search"></label>
@@ -290,7 +306,7 @@ nav.tabs button[aria-selected="true"]{color:var(--accent)}
   </div>
   <div class="panel">
     <header><h2>Dati</h2></header>
-    <p class="status" style="margin:0">Tutto resta sul telefono. Esporta ogni tanto per non perdere niente se svuoti il browser.</p>
+    <p class="status" style="margin:0">Le catture sono salvate sul telefono e, se hai un account, anche online. Senza account esporta ogni tanto un backup per non perdere niente se svuoti il browser.</p>
     <div class="row">
       <button class="btn" id="expJson">Esporta backup (JSON)</button>
       <button class="btn" id="expCsv">Esporta tabella (CSV)</button>
@@ -311,6 +327,7 @@ nav.tabs button[aria-selected="true"]{color:var(--accent)}
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
 <script>
 "use strict";
 /* ================= costanti ================= */
@@ -474,10 +491,14 @@ function advise(c,bottom,mode){const m=new Date(c.t).getMonth()+1;const L=c.ligh
   ()=>({species:"Serra, leccia, palamita, spigola",baits:"Minnow 11–14 cm, piumette, cucchiaioni a 2–4 nodi"}));
  // correzione dallo storico personale
  const near=catches.filter(k=>!k.blank&&k.lat!=null&&haversine(c.lat,c.lon,k.lat,k.lon)<3);
- for(const r of R){const mine=near.filter(k=>k.tech===r.id);if(!mine.length)continue;
-  const sim=mine.filter(k=>similar(k.cond,c));const n=mine.reduce((a,k)=>a+(k.count||1),0);const ns=sim.reduce((a,k)=>a+(k.count||1),0);
-  r.s=clamp(r.s+Math.min(20,ns*6+n*1.5),0,100);
-  const bait=topBy(mine,k=>k.bait);r.hist=`Qui hai preso ${n} ${n===1?"pesce":"pesci"} con questa tecnica`+(ns?`, ${ns} in condizioni simili`:"")+(bait?`. Esca migliore: ${bait}`:"")}
+ const others=me?community.rows.filter(k=>!k.blank&&k.lat!=null&&haversine(c.lat,c.lon,k.lat,k.lon)<3):[];
+ const tally=arr=>{const sim=arr.filter(k=>similar(k.cond,c));return{n:arr.reduce((a,k)=>a+(k.count||1),0),ns:sim.reduce((a,k)=>a+(k.count||1),0),bait:topBy(arr,k=>k.bait)}};
+ for(const r of R){const mine=near.filter(k=>k.tech===r.id);
+  if(mine.length){const{n,ns,bait}=tally(mine);r.s=clamp(r.s+Math.min(20,ns*6+n*1.5),0,100);
+   r.hist=`Qui hai preso ${n} ${n===1?"pesce":"pesci"} con questa tecnica`+(ns?`, ${ns} in condizioni simili`:"")+(bait?`. Esca migliore: ${bait}`:"")}
+  const theirs=others.filter(k=>k.tech===r.id);
+  if(theirs.length){const{n,ns,bait}=tally(theirs);const people=new Set(theirs.map(k=>k.owner)).size;r.s=clamp(r.s+Math.min(15,ns*4+n),0,100);
+   r.comm=`La community qui: ${n} ${n===1?"pesce":"pesci"} da ${people} ${people===1?"pescatore":"pescatori"}`+(ns?`, ${ns} in condizioni simili`:"")+(bait?`. Esca più usata: ${bait}`:"")}}
  const blanks=catches.filter(k=>k.blank&&k.lat!=null&&haversine(c.lat,c.lon,k.lat,k.lon)<1&&similar(k.cond,c));
  for(const b of blanks){const r=R.find(x=>x.id===b.tech);if(r){r.s=clamp(r.s-6,0,100);r.blank=(r.blank||0)+1}}
  return R.sort((a,b)=>b.s-a.s)}
@@ -487,7 +508,7 @@ function topBy(arr,f){const m={};for(const x of arr){const k=f(x);if(k)m[k]=(m[k
 /* ================= stato UI ================= */
 let point=null;   // {lat,lon,src}
 let cond=null;
-let map,diaryMap,pointMarker,catchLayer,diaryLayer,bathy,seamark;
+let map,diaryMap,pointMarker,catchLayer,commLayer,diaryLayer,bathy,seamark;
 
 function setTheme(t){if(t)document.documentElement.setAttribute("data-theme",t);else document.documentElement.removeAttribute("data-theme");settings.theme=t||null;saveSettings();
  document.querySelectorAll('meta[name="theme-color"]').forEach(m=>{if(t)m.setAttribute("content",t==="dark"?"#0a1417":"#e9f0ef");else m.setAttribute("content",m.media.includes("dark")?"#0a1417":"#e9f0ef")})}
@@ -505,8 +526,8 @@ function showTab(id){document.querySelectorAll("nav.tabs button").forEach(b=>b.s
 document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
 
 /* modalità */
-function setMode(m){settings.mode=m;saveSettings();document.querySelectorAll(".seg button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.mode===m));if(cond)renderAdvice()}
-document.querySelectorAll(".seg button").forEach(b=>b.onclick=()=>setMode(b.dataset.mode));setMode(settings.mode||"riva");
+function setMode(m){settings.mode=m;saveSettings();document.querySelectorAll(".seg button[data-mode]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.mode===m));if(cond)renderAdvice()}
+document.querySelectorAll(".seg button[data-mode]").forEach(b=>b.onclick=()=>setMode(b.dataset.mode));setMode(settings.mode||"riva");
 
 /* mappa */
 function initMap(){if(!window.L){$("#map").innerHTML='<p class="status" style="padding:12px">Mappa non disponibile senza rete. Il GPS funziona lo stesso.</p>';return}
@@ -514,15 +535,20 @@ function initMap(){if(!window.L){$("#map").innerHTML='<p class="status" style="p
  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:18,attribution:"© OpenStreetMap"}).addTo(map);
  bathy=L.tileLayer.wms("https://ows.emodnet-bathymetry.eu/wms",{layers:"emodnet:mean_multicolour",format:"image/png",transparent:true,opacity:.45,attribution:"EMODnet Bathymetry"});
  seamark=L.tileLayer("https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png",{maxZoom:18,attribution:"OpenSeaMap"});
- catchLayer=L.layerGroup();
- if($("#lyrBathy").checked)bathy.addTo(map);if($("#lyrSeamark").checked)seamark.addTo(map);catchLayer.addTo(map);
+ catchLayer=L.layerGroup();commLayer=L.layerGroup();
+ if($("#lyrBathy").checked)bathy.addTo(map);if($("#lyrSeamark").checked)seamark.addTo(map);catchLayer.addTo(map);commLayer.addTo(map);
+ $("#lyrComm").onchange=e=>e.target.checked?commLayer.addTo(map):map.removeLayer(commLayer);
  $("#lyrBathy").onchange=e=>e.target.checked?bathy.addTo(map):map.removeLayer(bathy);
  $("#lyrSeamark").onchange=e=>e.target.checked?seamark.addTo(map):map.removeLayer(seamark);
  $("#lyrCatches").onchange=e=>e.target.checked?catchLayer.addTo(map):map.removeLayer(catchLayer);
  map.on("click",e=>setPoint(e.latlng.lat,e.latlng.lng,"mappa"));
  drawCatchMarkers()}
 function cssVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()}
-function drawCatchMarkers(){if(!catchLayer)return;catchLayer.clearLayers();catches.filter(c=>c.lat!=null).forEach(c=>L.circleMarker([c.lat,c.lon],{radius:5,color:cssVar("--depth"),weight:2,fillOpacity:c.blank?0:.7}).bindTooltip(esc(c.blank?"Senza catture":c.species||"Cattura")).addTo(catchLayer))}
+function addMarkers(layer,list,mineColor){list.filter(c=>c.lat!=null).forEach(c=>{const label=esc(c.blank?"Senza catture":c.species||"Cattura")+(c.foreign?" · "+esc(c.owner):"");
+  if(c.foreign&&!c.precise)L.circle([c.lat,c.lon],{radius:700,color:cssVar("--warn"),weight:1.5,dashArray:"4 4",fillOpacity:.08}).bindTooltip(label+" (zona)").addTo(layer);
+  else L.circleMarker([c.lat,c.lon],{radius:c.foreign?5:6,color:c.foreign?cssVar("--warn"):(c.blank?cssVar("--muted"):mineColor),weight:2,fillOpacity:c.blank?0:.65}).bindTooltip(label).addTo(layer)})}
+function drawCatchMarkers(){if(!catchLayer)return;catchLayer.clearLayers();addMarkers(catchLayer,catches,cssVar("--depth"));
+ if(commLayer){commLayer.clearLayers();if(me)addMarkers(commLayer,community.rows)}}
 
 function getGPS(){return new Promise((res,rej)=>{if(!navigator.geolocation)return rej(new Error("Questo browser non dà la posizione."));navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lon:p.coords.longitude,acc:p.coords.accuracy}),e=>rej(new Error(e.code===1?"Permesso posizione negato: abilitalo nelle impostazioni del browser.":"Posizione non disponibile, riprova all'aperto.")),{enableHighAccuracy:true,timeout:15000,maximumAge:30000})})}
 $("#gpsBtn").onclick=async()=>{const st=$("#condStatus");st.className="status";st.textContent="Cerco il segnale GPS…";try{const p=await getGPS();setPoint(p.lat,p.lon,"gps",p.acc)}catch(e){st.className="status err";st.textContent=e.message}};
@@ -567,7 +593,7 @@ function renderAdvice(){if(!cond)return;const bottom=$("#condBottom").value;cons
  list.map((r,i)=>`<article class="tech${i===0?" top":""}"><div class="head"><h3>${esc(r.name)}</h3><span class="score">${r.s}/100</span></div><div class="bar"><i style="width:${r.s}%"></i></div>
   <ul class="why">${r.why.sort((a,b)=>b.pos-a.pos).slice(0,4).map(w=>`<li class="${w.pos?"":"neg"}">${esc(w.msg)}</li>`).join("")}</ul>
   <div class="meta"><b>Specie:</b> ${esc(r.species)}</div><div class="meta"><b>Esche:</b> ${esc(r.baits)}</div>
-  ${r.hist||r.blank?`<div class="chips">${r.hist?`<span class="chip hist">${esc(r.hist)}</span>`:""}${r.blank?`<span class="chip">${r.blank} uscit${r.blank===1?"a":"e"} a vuoto qui in condizioni simili</span>`:""}</div>`:""}</article>`).join("")}
+  ${r.hist||r.comm||r.blank?`<div class="chips">${r.hist?`<span class="chip hist">${esc(r.hist)}</span>`:""}${r.comm?`<span class="chip hist">${esc(r.comm)}</span>`:""}${r.blank?`<span class="chip">${r.blank} uscit${r.blank===1?"a":"e"} a vuoto qui in condizioni simili</span>`:""}</div>`:""}</article>`).join("")}
 function renderActivity(){const o=cond&&cond.outlook;if(!o||!o.length)return;$("#actPanel").hidden=false;const W=360,H=110,bw=W/o.length;
  const bars=o.map((p,i)=>{const h=Math.max(3,p.s*(H-30));const col=p.so==="major"||p.light==="alba"||p.light==="tramonto"?"var(--accent)":"var(--depth)";return `<rect x="${i*bw+3}" y="${H-18-h}" width="${bw-6}" height="${h}" rx="2" fill="${col}" opacity="${.45+p.s*.55}"/><text x="${i*bw+bw/2}" y="${H-4}" text-anchor="middle">${new Date(p.t).getHours()}</text>`}).join("");
  const best=o.reduce((a,b)=>b.s>a.s?b:a);
@@ -577,7 +603,8 @@ function renderActivity(){const o=cond&&cond.outlook;if(!o||!o.length)return;$("
 let editingId=null,photoData=null;
 function resetForm(){editingId=null;photoData=null;$("#catchForm").reset();$("#fCount").value=1;$("#fTime").value=localInputValue(new Date());$("#photoPrev").hidden=true;$("#formTitle").textContent="Nuova cattura";$("#saveBtn").textContent="Salva cattura";$("#cancelEdit").hidden=true;$("#fishSet").disabled=false;delete $("#fDepth").dataset.touched;
  if(point){$("#formPos").textContent=fmtPos(point.lat,point.lon);if(cond&&cond.depth!=null)$("#fDepth").value=Math.round(cond.depth*2)/2;$("#fBottom").value=$("#condBottom").value}
- const lastTech=catches[0]?.tech;if(lastTech)$("#fTech").value=lastTech}
+ const lastTech=catches[0]?.tech;if(lastTech)$("#fTech").value=lastTech;
+ $("#fShare").value=settings.share||"zona";updateShareHint()}
 $("#fDepth").oninput=e=>e.target.dataset.touched="1";
 $("#fBlank").onchange=e=>{$("#fishSet").disabled=e.target.checked};
 $("#formGps").onclick=async()=>{$("#formPos").textContent="cerco GPS…";try{const p=await getGPS();await setPoint(p.lat,p.lon,"gps",p.acc);$("#fBottom").value=$("#condBottom").value}catch(e){$("#formPos").textContent="GPS non disponibile";toast(e.message)}};
@@ -590,11 +617,13 @@ $("#catchForm").addEventListener("submit",async e=>{e.preventDefault();const bla
  if(!point&&!editingId){toast("Manca la posizione: usa il GPS o il punto della mappa");return}
  const when=$("#fTime").value?new Date($("#fTime").value):new Date();
  const old=editingId?catches.find(c=>c.id===editingId):null;
- const rec={id:old?old.id:uid(),created:old?old.created:Date.now(),t:+when,lat:old&&!point?old.lat:point.lat,lon:old&&!point?old.lon:point.lon,
+ const rec={id:old?old.id:newId(),created:old?old.created:Date.now(),t:+when,lat:old&&!point?old.lat:point.lat,lon:old&&!point?old.lon:point.lon,
   blank,species:blank?"":species,count:blank?0:Math.max(1,parseInt($("#fCount").value)||1),weight:num(parseFloat($("#fWeight").value)),length:num(parseFloat($("#fLength").value)),released:$("#fReleased").checked,
   tech:$("#fTech").value,baitType:$("#fBaitType").value,bait:$("#fBait").value.trim(),baitColor:$("#fBaitColor").value.trim(),
   bottom:$("#fBottom").value,depth:num(parseFloat($("#fDepth").value)),spot:$("#fSpot").value.trim(),notes:$("#fNotes").value.trim(),
-  mode:settings.mode,hasPhoto:old?old.hasPhoto:false,cond:old&&old.t===+when&&old.lat===point?.lat?old.cond:null,place:old?old.place:""};
+  mode:settings.mode,hasPhoto:old?old.hasPhoto:false,cond:old&&old.t===+when&&old.lat===point?.lat?old.cond:null,place:old?old.place:"",
+  share:$("#fShare").value,sync:"pending",uidOwner:old?old.uidOwner:undefined,photoPath:old?old.photoPath:null,photoUp:photoData?0:(old?old.photoUp:0)};
+ settings.share=rec.share;saveSettings();
  if(rec.bottom)rememberBottom(rec.lat,rec.lon,rec.bottom);
  if(photoData){await photoDB.put(rec.id,photoData).catch(()=>{});rec.hasPhoto=true}
  $("#saveBtn").disabled=true;$("#formStatus").textContent="Scarico le condizioni del momento…";
@@ -603,28 +632,32 @@ $("#catchForm").addEventListener("submit",async e=>{e.preventDefault();const bla
  if(old)catches[catches.indexOf(old)]=rec;else catches.unshift(rec);catches.sort((a,b)=>b.t-a.t);saveCatches();
  $("#saveBtn").disabled=false;$("#formStatus").textContent="Luna, maree, vento, onda e temperatura dell'acqua vengono scaricati in automatico al salvataggio.";
  toast(rec.cond?(old?"Modifica salvata":"Cattura salvata con le condizioni"):"Salvata. Condizioni da completare quando torna la rete");
- refreshLists();drawCatchMarkers();resetForm();if(old)showTab("diary");if(cond)renderAdvice()});
+ refreshLists();drawCatchMarkers();resetForm();if(old)showTab("diary");if(cond)renderAdvice();
+ pushPending().then(r=>{if(r&&r.n&&!r.err&&rec.share!=="privata")toast(rec.share==="esatta"?"Condivisa con la community":"Condivisa con la community (solo la zona)")})});
 
 /* ================= diario ================= */
+const pool=()=>diarySrc==="all"&&me?community.rows:catches;
 function initDiaryMap(){if(!window.L)return;if(!diaryMap){diaryMap=L.map("diaryMap");L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:18,attribution:"© OpenStreetMap"}).addTo(diaryMap);diaryLayer=L.layerGroup().addTo(diaryMap)}
- diaryMap.invalidateSize();diaryLayer.clearLayers();const pts=catches.filter(c=>c.lat!=null);
- pts.forEach(c=>L.circleMarker([c.lat,c.lon],{radius:6,color:c.blank?cssVar("--muted"):cssVar("--accent"),weight:2,fillOpacity:c.blank?0:.6}).bindPopup(`<b>${esc(c.blank?"Senza catture":c.species)}</b><br>${esc(new Date(c.t).toLocaleDateString("it-IT"))}${c.bait?"<br>"+esc(c.bait):""}`).addTo(diaryLayer));
+ diaryMap.invalidateSize();diaryLayer.clearLayers();const pts=pool().filter(c=>c.lat!=null);
+ addMarkers(diaryLayer,pts,cssVar("--accent"));
  if(pts.length)diaryMap.fitBounds(L.latLngBounds(pts.map(c=>[c.lat,c.lon])).pad(.3),{maxZoom:13});else diaryMap.setView([42.5,11.5],5)}
 const techName=id=>(TECHS.find(t=>t.id===id)||{name:id||"—"}).name;
 const bottomName=id=>(BOTTOMS.find(b=>b[0]===id)||["","—"])[1];
 function condChips(c){if(!c)return'<span class="chip">condizioni mancanti</span>';const a=[];a.push(phaseName(c.moonPhase));if(c.tide)a.push("marea "+c.tide.phase);if(c.wind!=null)a.push(`${windName(c.windDir)} ${fx(c.wind,0)} km/h`);if(c.wave!=null)a.push(`onda ${fx(c.wave)} m`);if(c.sst!=null)a.push(`acqua ${fx(c.sst)} °C`);a.push(c.light);if(c.solunar)a.push("solunare "+(c.solunar==="major"?"maggiore":"minore"));return a.map(x=>`<span class="chip">${esc(x)}</span>`).join("")}
-function renderDiary(){refreshLists();const q=$("#diaryFilter").value.trim().toLowerCase();
- const list=catches.filter(c=>!q||[c.species,c.bait,c.spot,c.place,techName(c.tech),c.notes].join(" ").toLowerCase().includes(q));
- const fish=catches.reduce((a,c)=>a+(c.count||0),0);$("#diaryCount").textContent=`${fish} pesci · ${catches.length} registrazioni`;
+function renderDiary(){refreshLists();const q=$("#diaryFilter").value.trim().toLowerCase();const src=pool(),all=src!==catches;
+ $("#srcSeg").hidden=!me;document.querySelectorAll("#srcSeg button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.src===(all?"all":"mine")));
+ const list=src.filter(c=>!q||[c.species,c.bait,c.spot,c.place,techName(c.tech),c.notes,c.owner].join(" ").toLowerCase().includes(q));
+ const fish=src.reduce((a,c)=>a+(c.count||0),0);const np=new Set(src.map(c=>c.owner)).size;$("#diaryCount").textContent=(fish===1?"1 pesce":fish+" pesci")+" · "+(all?(np===1?"1 pescatore":np+" pescatori"):(catches.length===1?"1 registrazione":catches.length+" registrazioni"));
  $("#syncBtn").hidden=!catches.some(c=>!c.cond&&Date.now()-c.t<90*864e5);
- $("#diaryList").innerHTML=list.length?list.map(c=>`<div class="entry" data-id="${c.id}">
-  <button class="sum" aria-expanded="false"><span class="thumb" data-photo="${c.hasPhoto?c.id:""}">${esc((c.blank?"—":c.species||"?").slice(0,2))}</span>
-  <span class="t"><b>${c.blank?"Uscita senza catture":esc(c.species)+(c.count>1?" ×"+c.count:"")+(c.weight?` · ${fx(c.weight,2)} kg`:"")}</b><span>${esc(dateLong(new Date(c.t)))} · ${esc(c.spot||c.place||fmtPos(c.lat,c.lon))}</span><span>${esc(techName(c.tech))}${c.bait?" · "+esc(c.bait):""}</span></span>
+ $("#diaryList").innerHTML=list.length?list.map(c=>`<div class="entry${c.foreign?" foreign":""}" data-id="${esc(c.id)}">
+  <button class="sum" aria-expanded="false">${c.photoUrl?`<img class="thumb" src="${esc(c.photoUrl)}" alt="" loading="lazy">`:`<span class="thumb" data-photo="${c.hasPhoto?c.id:""}">${esc((c.blank?"—":c.species||"?").slice(0,2))}</span>`}
+  <span class="t"><b>${c.blank?"Uscita senza catture":esc(c.species)+(c.count>1?" ×"+c.count:"")+(c.weight?` · ${fx(c.weight,2)} kg`:"")}</b><span>${c.foreign?`<span class="owner">${esc(c.owner)}</span> · `:""}${esc(dateLong(new Date(c.t)))} · ${esc(c.spot||c.place||(c.foreign&&!c.precise?"zona riservata":fmtPos(c.lat,c.lon)))}</span><span>${esc(techName(c.tech))}${c.bait?" · "+esc(c.bait):""}</span></span>
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
   <div class="detail" hidden>
    <div class="chips">${condChips(c.cond)}</div>
    <div class="kv">
-    <div><span>Posizione</span><b class="mono" style="font-weight:400;font-size:.85rem">${fmtPos(c.lat,c.lon)}</b></div>
+    <div><span>Posizione</span>${c.foreign&&!c.precise?"Zona di circa 1 km":`<b class="mono" style="font-weight:400;font-size:.85rem">${fmtPos(c.lat,c.lon)}</b>`}</div>
+    ${c.foreign?"":`<div><span>Chi la vede</span>${{esatta:"Tutti, punto esatto",zona:"Tutti, solo la zona",privata:"Solo io"}[c.share||"privata"]}${sb&&me?(c.sync==="ok"?" · inviata":" · da inviare"):""}</div>`}
     <div><span>Fondale</span>${esc(bottomName(c.bottom))}${c.depth!=null?" · "+fx(c.depth,1)+" m":""}</div>
     <div><span>Esca</span>${esc([c.baitType,c.bait,c.baitColor].filter(Boolean).join(" · ")||"—")}</div>
     <div><span>Misure</span>${c.length?fx(c.length,1)+" cm":"—"}${c.released?" · rilasciato":""}</div>
@@ -634,19 +667,20 @@ function renderDiary(){refreshLists();const q=$("#diaryFilter").value.trim().toL
    </div>
    ${c.notes?`<p style="margin:0">${esc(c.notes)}</p>`:""}
    <div class="photo-slot"></div>
-   <div class="row"><button class="btn small" data-act="edit">Modifica</button>${!c.cond?'<button class="btn small" data-act="sync">Scarica condizioni</button>':""}<button class="btn small ghost" data-act="del">Elimina</button></div>
+   ${c.foreign?"":`<div class="row"><button class="btn small" data-act="edit">Modifica</button>${!c.cond?'<button class="btn small" data-act="sync">Scarica condizioni</button>':""}<button class="btn small ghost" data-act="del">Elimina</button></div>`}
    <div class="confirm" hidden><span>Eliminare questa registrazione?</span><button class="btn small primary" data-act="delyes">Elimina</button><button class="btn small ghost" data-act="delno">No</button></div>
-  </div></div>`).join(""):`<div class="empty">${catches.length?"Nessun risultato per questo filtro.":"Ancora nessuna cattura. Dalla scheda Registra salvi pesce, esca e fondale: le condizioni le aggiungo io."}</div>`;
+  </div></div>`).join(""):`<div class="empty">${src.length?"Nessun risultato per questo filtro.":all?"Nessuno ha ancora condiviso catture. Le prime saranno le tue.":"Ancora nessuna cattura. Dalla scheda Registra salvi pesce, esca e fondale: le condizioni le aggiungo io."}</div>`;
  document.querySelectorAll(".thumb[data-photo]").forEach(async el=>{if(!el.dataset.photo)return;const d=await photoDB.get(el.dataset.photo);if(d){const i=new Image();i.src=d;i.className="thumb";i.alt="";el.replaceWith(i)}});
  renderStats()}
 $("#diaryFilter").oninput=renderDiary;
-$("#diaryList").addEventListener("click",async e=>{const ent=e.target.closest(".entry");if(!ent)return;const id=ent.dataset.id;const c=catches.find(x=>x.id===id);
+$("#diaryList").addEventListener("click",async e=>{const ent=e.target.closest(".entry");if(!ent)return;const id=ent.dataset.id;const c=pool().find(x=>x.id===id);if(!c)return;
  if(e.target.closest("button.sum")){const d=ent.querySelector(".detail");d.hidden=!d.hidden;ent.querySelector("button.sum").setAttribute("aria-expanded",!d.hidden);
-  if(!d.hidden&&c.hasPhoto){const slot=d.querySelector(".photo-slot");if(!slot.firstChild){const p=await photoDB.get(id);if(p)slot.innerHTML=`<img src="${p}" alt="Foto della cattura" style="max-width:100%;border-radius:8px">`}}return}
+  if(!d.hidden&&(c.hasPhoto||c.photoUrl)){const slot=d.querySelector(".photo-slot");if(!slot.firstChild){const p=c.photoUrl||await photoDB.get(id);if(p)slot.innerHTML=`<img src="${esc(p)}" alt="Foto della cattura" style="max-width:100%;border-radius:8px">`}}return}
+ if(c.foreign)return;
  const act=e.target.dataset.act;if(!act)return;
  if(act==="del"){ent.querySelector(".confirm").hidden=false}
  if(act==="delno"){ent.querySelector(".confirm").hidden=true}
- if(act==="delyes"){catches=catches.filter(x=>x.id!==id);saveCatches();photoDB.del(id);renderDiary();initDiaryMap();drawCatchMarkers();toast("Eliminata")}
+ if(act==="delyes"){catches=catches.filter(x=>x.id!==id);saveCatches();photoDB.del(id);if(sb&&!delQueue.includes(id)){delQueue.push(id);LS.set("carniere.delqueue",delQueue);pushPending()}renderDiary();initDiaryMap();drawCatchMarkers();toast("Eliminata")}
  if(act==="sync"){e.target.disabled=true;e.target.textContent="Scarico…";await syncOne(c);saveCatches();renderDiary()}
  if(act==="edit")startEdit(c)});
 async function syncOne(c){try{c.cond=await fetchConditions(c.lat,c.lon,new Date(c.t));if(c.depth==null&&c.cond.depth!=null)c.depth=Math.round(c.cond.depth*2)/2;if(!c.place)c.place=await fetchPlace(c.lat,c.lon);return true}catch(e){toast("Ancora offline o dati non disponibili per quella data");return false}}
@@ -656,7 +690,7 @@ function startEdit(c){showTab("log");editingId=c.id;photoData=null;$("#formTitle
  point={lat:c.lat,lon:c.lon,src:"diario"};$("#formPos").textContent=fmtPos(c.lat,c.lon);
  $("#fBlank").checked=!!c.blank;$("#fishSet").disabled=!!c.blank;$("#fSpecies").value=c.species||"";$("#fCount").value=c.count||1;$("#fWeight").value=c.weight??"";$("#fLength").value=c.length??"";$("#fReleased").checked=!!c.released;
  $("#fTech").value=c.tech;$("#fBaitType").value=c.baitType||"naturale";$("#fBait").value=c.bait||"";$("#fBaitColor").value=c.baitColor||"";$("#fBottom").value=c.bottom||"";$("#fDepth").value=c.depth??"";$("#fDepth").dataset.touched="1";
- $("#fTime").value=localInputValue(new Date(c.t));$("#fSpot").value=c.spot||"";$("#fNotes").value=c.notes||"";$("#photoPrev").hidden=true;
+ $("#fTime").value=localInputValue(new Date(c.t));$("#fSpot").value=c.spot||"";$("#fShare").value=c.share||"privata";updateShareHint();$("#fNotes").value=c.notes||"";$("#photoPrev").hidden=true;
  if(c.hasPhoto)photoDB.get(c.id).then(p=>{if(p){$("#photoPrev").src=p;$("#photoPrev").hidden=false}})}
 
 function renderStats(){const real=catches.filter(c=>!c.blank&&c.species);if(!real.length){$("#stats").innerHTML='<div class="empty">Le statistiche compaiono dopo le prime catture: esche che funzionano per specie, fase di marea e di luna.</div>';return}
@@ -678,11 +712,124 @@ $("#impJson").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{cons
  if(Array.isArray(j.spots)){spots=spots.concat(j.spots);LS.set("carniere.spots",spots)}if(j.photos)for(const[id,p]of Object.entries(j.photos))await photoDB.put(id,p).catch(()=>{});
  toast(`Importate ${n} registrazioni`);renderDiary();initDiaryMap();drawCatchMarkers()}catch(err){toast("File non valido: serve un backup esportato da Carniere")}e.target.value=""};
 
+/* ================= database comune (Supabase) =================
+   Le catture complete stanno nella tabella "catches", leggibile solo da chi le ha fatte.
+   La tabella "shared_catches" la compila il database: posizione arrotondata a ~1 km per "zona",
+   niente per "privata". L'app funziona anche senza account: tutto resta sul telefono. */
+const SUPA_URL="";   // es. https://abcdefgh.supabase.co
+const SUPA_KEY="";   // chiave "anon public" / "publishable"
+const sb=(window.supabase&&SUPA_URL&&SUPA_KEY)?window.supabase.createClient(SUPA_URL,SUPA_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}):null;
+let me=null;
+let community=LS.get("carniere.community",{at:0,rows:[]});
+let delQueue=LS.get("carniere.delqueue",[]);
+let diarySrc=settings.diarySrc||"mine";
+let authMode="in";
+function newId(){try{return crypto.randomUUID()}catch(e){return uid()+uid()}}
+const photoUrlOf=path=>path&&sb?sb.storage.from("foto").getPublicUrl(path).data.publicUrl:null;
+
+function updateShareHint(){const v=$("#fShare").value,h=$("#shareHint");
+ const txt={zona:"Gli altri vedono specie, esca, tecnica, condizioni e la zona di circa 1 km. Nome dello spot e note restano solo tuoi.",
+  esatta:"Gli altri vedono anche il punto GPS preciso, il nome dello spot e le note.",
+  privata:"Nessun altro la vede. Se hai un account resta salvata nel tuo archivio online."}[v];
+ h.textContent=(!sb||me)?txt:txt+" Per condividere accedi dalla scheda Diario."}
+$("#fShare").onchange=updateShareHint;
+
+function payload(c){const {id,t,lat,lon,hasPhoto,sync,share,photoPath,photoUp,created,foreign,owner,precise,photoUrl,uidOwner,...data}=c;return data}
+async function dataUrlToBlob(d){return (await fetch(d)).blob()}
+async function blobToDataUrl(b){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(b)})}
+
+async function pushOne(c){const vis=c.share||"privata";let path=c.photoPath||null;
+ if(c.hasPhoto&&vis!=="privata"&&!c.photoUp){const d=await photoDB.get(c.id);
+  if(d){path=`${me.id}/${c.id}.jpg`;const {error}=await sb.storage.from("foto").upload(path,await dataUrlToBlob(d),{upsert:true,contentType:"image/jpeg"});if(error)throw error;c.photoUp=1}}
+ if(vis==="privata"&&path){await sb.storage.from("foto").remove([path]);path=null;c.photoUp=0}
+ const {error}=await sb.from("catches").upsert({id:c.id,user_id:me.id,visibility:vis,t:new Date(c.t).toISOString(),lat:c.lat,lon:c.lon,data:payload(c),photo_path:path,updated_at:new Date().toISOString()});
+ if(error)throw error;c.share=vis;c.photoPath=path;c.sync="ok";c.uidOwner=me.id}
+let pushing=false;
+async function pushPending(){if(!sb||!me||pushing||!navigator.onLine)return null;pushing=true;let n=0,err=null;
+ try{
+  for(const id of [...delQueue]){const {error}=await sb.from("catches").delete().eq("id",id);if(error){err=error;break}
+   await sb.storage.from("foto").remove([`${me.id}/${id}.jpg`]);delQueue=delQueue.filter(x=>x!==id);LS.set("carniere.delqueue",delQueue)}
+  if(!err)for(const c of catches.filter(c=>c.sync!=="ok"&&c.lat!=null&&(!c.uidOwner||c.uidOwner===me.id))){try{await pushOne(c);n++}catch(e){err=e;break}}
+  saveCatches()}
+ finally{pushing=false}
+ if(err){console.warn("Invio non riuscito",err);toast("Invio al database non riuscito: riprovo più tardi")}
+ renderAccount();if(!$("#tab-diary").hidden)renderDiary();return{n,err}}
+
+async function pullMine(){const {data,error}=await sb.from("catches").select("id,visibility,t,lat,lon,data,photo_path").eq("user_id",me.id).limit(5000);
+ if(error||!data)return;const ids=new Set(catches.map(c=>c.id));let n=0;
+ for(const r of data){if(ids.has(r.id)||delQueue.includes(r.id))continue;
+  const c={...r.data,id:r.id,t:Date.parse(r.t),lat:r.lat,lon:r.lon,share:r.visibility,photoPath:r.photo_path,photoUp:r.photo_path?1:0,sync:"ok",uidOwner:me.id,hasPhoto:false};catches.push(c);n++;
+  if(r.photo_path)fetch(photoUrlOf(r.photo_path)).then(x=>x.ok?x.blob():null).then(b=>b&&blobToDataUrl(b)).then(d=>{if(d){photoDB.put(c.id,d);c.hasPhoto=true;saveCatches()}}).catch(()=>{})}
+ if(n){catches.sort((a,b)=>b.t-a.t);saveCatches();refreshLists();drawCatchMarkers();toast(`Ritrovate ${n} ${n===1?"cattura":"catture"} dal tuo archivio online`)}}
+
+async function fetchCommunity(force){if(!sb||!me||!navigator.onLine)return;if(!force&&Date.now()-community.at<10*60e3)return;
+ const {data,error}=await sb.from("shared_catches").select("id,user_id,precise,t,lat,lon,data,photo_path,profiles(nickname)").neq("user_id",me.id).order("t",{ascending:false}).limit(1500);
+ if(error){console.warn(error);return}
+ community={at:Date.now(),rows:data.map(r=>({...r.data,id:r.id,t:Date.parse(r.t),lat:r.lat,lon:r.lon,precise:r.precise,owner:(r.profiles&&r.profiles.nickname)||"Pescatore",photoUrl:photoUrlOf(r.photo_path),foreign:true}))};
+ LS.set("carniere.community",community);drawCatchMarkers();renderAccount();
+ if(!$("#tab-diary").hidden){renderDiary();initDiaryMap()}if(cond)renderAdvice()}
+
+async function setSession(s){
+ if(!s){me=null;community={at:0,rows:[]};LS.set("carniere.community",community);renderAccount();updateShareHint();drawCatchMarkers();if(!$("#tab-diary").hidden){renderDiary();initDiaryMap()}return}
+ if(me&&me.id===s.user.id)return;
+ me={id:s.user.id,email:s.user.email,nickname:(s.user.user_metadata&&s.user.user_metadata.nickname)||"Pescatore"};
+ const {data}=await sb.from("profiles").select("nickname").eq("id",me.id).maybeSingle();if(data)me.nickname=data.nickname;
+ $("#lyrCommWrap").hidden=false;renderAccount();updateShareHint();
+ await pullMine();await pushPending();await fetchCommunity(true)}
+async function initAuth(){renderAccount();updateShareHint();if(!sb)return;
+ try{const {data}=await sb.auth.getSession();await setSession(data.session)}catch(e){console.warn(e)}
+ sb.auth.onAuthStateChange((ev,s)=>{if(ev==="SIGNED_IN"||ev==="SIGNED_OUT")setTimeout(()=>setSession(s),0)})}
+
+function authError(e){const m=(e&&e.message||"").toLowerCase();
+ if(m.includes("invalid login"))return"Email o password non corrette.";
+ if(m.includes("already registered")||m.includes("already been registered"))return"Esiste già un account con questa email: usa Accedi.";
+ if(m.includes("password")&&m.includes("6"))return"La password deve avere almeno 6 caratteri.";
+ if(m.includes("email not confirmed"))return"Devi prima confermare l'email: apri il link che ti è arrivato.";
+ if(m.includes("rate")||m.includes("too many"))return"Troppi tentativi: riprova tra qualche minuto.";
+ if(m.includes("valid email")||m.includes("invalid email"))return"Controlla l'indirizzo email.";
+ if(m.includes("fetch")||m.includes("network"))return"Nessuna connessione: riprova quando hai rete.";
+ return"Non è andata: "+(e&&e.message||"errore sconosciuto")}
+function renderAccount(){const b=$("#acctBody"),st=$("#acctState");if(!b)return;
+ if(!sb){st.textContent="non attiva";b.innerHTML=`<p class="status" style="margin:0">Il database comune non è ancora collegato a questa versione dell'app. Intanto le catture restano salvate sul telefono.</p>`;return}
+ if(!me){st.textContent="";const up=authMode==="up";
+  b.innerHTML=`<form class="auth" id="authForm" novalidate>
+   <p class="status" style="margin:0">Con un account vedi le catture condivise dagli altri pescatori, e loro vedono le tue che scegli di condividere. Le tue catture vengono anche salvate online, così cambiando telefono le ritrovi.</p>
+   <div class="seg" role="group" aria-label="Accedi o registrati"><button type="button" data-auth="in" aria-pressed="${!up}">Accedi</button><button type="button" data-auth="up" aria-pressed="${up}">Crea account</button></div>
+   ${up?`<label class="f"><span class="label">Nome che vedono gli altri</span><input id="aNick" autocomplete="nickname" maxlength="30" placeholder="es. Marco di Muggia"></label>`:""}
+   <label class="f"><span class="label">Email</span><input id="aEmail" type="email" autocomplete="email" autocapitalize="none" autocorrect="off" inputmode="email" enterkeyhint="next"></label>
+   <label class="f"><span class="label">Password</span><input id="aPass" type="password" autocomplete="${up?"new-password":"current-password"}" minlength="6" enterkeyhint="go">${up?`<span class="hint">Almeno 6 caratteri.</span>`:""}</label>
+   <p class="status err" id="authErr" style="margin:0" hidden></p>
+   <div class="row"><button class="btn primary" type="submit" id="authBtn">${up?"Crea account":"Accedi"}</button></div></form>`;
+  b.querySelectorAll("[data-auth]").forEach(x=>x.onclick=()=>{authMode=x.dataset.auth;renderAccount()});
+  $("#authForm").onsubmit=async e=>{e.preventDefault();const err=$("#authErr"),btn=$("#authBtn");err.hidden=true;
+   const email=$("#aEmail").value.trim(),pass=$("#aPass").value,nick=up?$("#aNick").value.trim():"";
+   if(up&&(nick.length<2||nick.length>30)){err.textContent="Scegli un nome di almeno 2 caratteri.";err.hidden=false;return}
+   if(!email||!pass){err.textContent="Scrivi email e password.";err.hidden=false;return}
+   btn.disabled=true;btn.textContent="Un momento…";
+   try{if(up){const {data,error}=await sb.auth.signUp({email,password:pass,options:{data:{nickname:nick},emailRedirectTo:location.href.split("#")[0]}});if(error)throw error;
+     if(!data.session){err.className="status";err.textContent="Ti ho mandato una mail: apri il link di conferma, poi torna qui e accedi.";err.hidden=false;authMode="in";btn.disabled=false;btn.textContent="Crea account";return}}
+    else{const {error}=await sb.auth.signInWithPassword({email,password:pass});if(error)throw error}
+    toast(up?"Account creato":"Accesso eseguito")}
+   catch(x){err.className="status err";err.textContent=authError(x);err.hidden=false;btn.disabled=false;btn.textContent=up?"Crea account":"Accedi"}};
+  return}
+ const pend=catches.filter(c=>c.sync!=="ok").length+delQueue.length;const shared=catches.filter(c=>c.sync==="ok"&&c.share&&c.share!=="privata").length;
+ st.textContent=me.nickname;
+ b.innerHTML=`<p style="margin:0">Sei dentro come <b>${esc(me.nickname)}</b> <span class="status">· ${esc(me.email||"")}</span></p>
+  <div class="kv"><div><span>Dagli altri</span>${community.rows.length} catture</div><div><span>Condivise da te</span>${shared}</div><div><span>Da inviare</span>${pend||"nessuna"}</div><div><span>Aggiornato</span>${community.at?hhmm(new Date(community.at)):"—"}</div></div>
+  <div class="row"><button class="btn small" id="acctRefresh">Aggiorna adesso</button><button class="btn small ghost" id="acctOut">Esci</button></div>`;
+ $("#acctRefresh").onclick=async e=>{e.target.disabled=true;await pushPending();await fetchCommunity(true);toast("Aggiornato")};
+ $("#acctOut").onclick=async()=>{await sb.auth.signOut();toast("Sei uscito. Le tue catture restano sul telefono")}}
+
+document.querySelectorAll("#srcSeg button").forEach(b=>b.onclick=()=>{diarySrc=b.dataset.src;settings.diarySrc=diarySrc;saveSettings();renderDiary();initDiaryMap()});
+window.addEventListener("online",()=>{pushPending();fetchCommunity()});
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")fetchCommunity()});
+
 /* ================= avvio ================= */
 refreshLists();resetForm();initMap();
 if(settings.last){$("#posLabel").textContent=fmtPos(settings.last.lat,settings.last.lon)+" (ultimo punto)"}
 if("serviceWorker" in navigator&&location.protocol.startsWith("http"))navigator.serviceWorker.register("sw.js").catch(()=>{});
 if(navigator.onLine)setTimeout(syncAll,3000);
+initAuth();
 </script>
 </body>
 </html>
